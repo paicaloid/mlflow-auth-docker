@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:latest
+    container_name: postgres
+    restart: always
+    volumes:
+      - app-db-data:/var/lib/postgresql/data
+    env_file:
+      - .env
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - POSTGRES_DB=${POSTGRES_DB?Variable not set}
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  s3:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    ports:
+      - 9000:9000
+      - 9001:9001
+    env_file:
+      - .env
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER?Variable not set}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+    volumes:
+      - minio-data:/data
+    networks:
+      - internal
+      - public
+    command: server /data --console-address ":9001"
+
+  create_s3_buckets:
+    image: minio/mc:latest
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER?Variable not set}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID?Variable not set}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY?Variable not set}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME?Variable not set}
+    depends_on:
+      - s3
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set minio http://s3:9000 '${MINIO_ROOT_USER}' '${MINIO_ROOT_PASSWORD}') do echo '...waiting...' && sleep 1; done;
+      /usr/bin/mc mb minio/${AWS_BUCKET_NAME};
+      /usr/bin/mc admin user add minio ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY};
+      /usr/bin/mc admin policy attach minio readwrite --user=${AWS_ACCESS_KEY_ID};
+      exit 0;
+      "
+    networks:
+      - internal
+
+  mlflow:
+    image: mlflow-auth:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mlflow
+    restart: unless-stopped
+    ports:
+      - 5000:5000
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID?Variable not set}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY?Variable not set}
+      - AWS_DEFAULT_REGION=${AWS_REGION?Variable not set}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME?Variable not set}
+      - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
+    networks:
+      - public
+      - internal
+    depends_on:
+      - db
+      - s3
+    entrypoint: |
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      --default-artifact-root s3://${AWS_BUCKET_NAME}/
+      --artifacts-destination s3://${AWS_BUCKET_NAME}/
+      --app-name basic-auth
+      -h 0.0.0.0
+
+networks:
+  internal:
+  public:
+    driver: bridge
+
+volumes:
+  app-db-data:
+  minio-data:
