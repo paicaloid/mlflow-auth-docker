@@ -93,6 +93,32 @@ services:
       --app-name basic-auth
       -h 0.0.0.0
 
+  run_test_experiment:
+    build:
+      context: ./test_experiment
+      dockerfile: Dockerfile
+    container_name: test_experiment
+    depends_on:
+      - mlflow
+    networks:
+      - internal
+    environment:
+      - MLFLOW_TRACKING_USERNAME=${MLFLOW_TRACKING_USERNAME?Variable not set}
+      - MLFLOW_TRACKING_PASSWORD=${MLFLOW_TRACKING_PASSWORD?Variable not set}
+      - MLFLOW_TRACKING_NEW_PASSWORD=${MLFLOW_TRACKING_NEW_PASSWORD?Variable not set}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID?Variable not set}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY?Variable not set}
+      - AWS_DEFAULT_REGION=${AWS_REGION?Variable not set}
+    entrypoint: >
+      /bin/sh -c "
+      python mlflow_update_user.py;
+      export MLFLOW_TRACKING_PASSWORD=${MLFLOW_TRACKING_NEW_PASSWORD};
+      python mlflow_tracking.py;
+      exit 0;
+      "
+
 networks:
   internal:
   public:
