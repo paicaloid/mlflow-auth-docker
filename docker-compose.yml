@@ -6,6 +6,7 @@ services:
     container_name: postgres
     restart: always
     volumes:
+      - app-db-pgdata:/var/lib/postgresql/data/pgdata
       - app-db-data:/var/lib/postgresql/data
     env_file:
       - .env
@@ -127,3 +128,4 @@ networks:
 volumes:
   app-db-data:
   minio-data:
+  app-db-pgdata:
